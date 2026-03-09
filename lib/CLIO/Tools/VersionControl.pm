@@ -22,10 +22,10 @@ CLIO::Tools::VersionControl - Git version control operations tool
 
 =head1 DESCRIPTION
 
-Provides 10 git operations for repository management, history, and collaboration.
+Provides 11 git operations for repository management, history, and collaboration.
 
 Operations:
-  status, log, diff, branch, commit, push, pull, blame, stash, tag
+  status, log, diff, branch, commit, push, pull, blame, stash, tag, worktree
 
 =cut
 
@@ -54,6 +54,9 @@ sub new {
 -  stash - Stash operations (save, list, apply, drop)
 -  tag - Tag operations (list, create, delete)
 
+━━━━━━━━━━━━━━━━━━━━━ WORKTREE (1 operation) ━━━━━━━━━━━━━━━━━━━━━
+-  worktree - Worktree operations (list, add, remove, prune)
+
 [CRITICAL WARNING] ⚠️  NEVER USE INTERACTIVE OPERATIONS:
 -  git rebase -i / --interactive (BREAKS TERMINAL UI - FORBIDDEN)
 -  git mergetool (BREAKS TERMINAL UI - FORBIDDEN)
@@ -62,7 +65,7 @@ sub new {
 Use non-interactive flags or report what needs to be done instead.
 },
         supported_operations => [qw(
-            status log diff branch commit push pull blame stash tag
+            status log diff branch commit push pull blame stash tag worktree
         )],
         %opts,
     );
@@ -104,6 +107,8 @@ sub route_operation {
         return $self->stash($params, $context);
     } elsif ($operation eq 'tag') {
         return $self->tag($params, $context);
+    } elsif ($operation eq 'worktree') {
+        return $self->worktree($params, $context);
     }
     
     return $self->error_result("Operation not implemented: $operation");
@@ -569,6 +574,106 @@ sub tag {
     return $result;
 }
 
+sub worktree {
+    my ($self, $params, $context) = @_;
+    
+    my $repo_path = $params->{repository_path} || '.';
+    my $action = $params->{action} || 'list';  # list, add, remove, prune
+    my $worktree_path = $params->{worktree_path} || '';
+    my $result;
+    
+    # Validate worktree_path for sandbox mode (add/remove create/delete dirs)
+    if ($worktree_path && $context && $context->{config} && $context->{config}->get('sandbox')) {
+        my $sandbox_check = $self->_check_sandbox_path($worktree_path, $context);
+        return $self->error_result($sandbox_check->{error}) unless $sandbox_check->{allowed};
+    }
+    
+    # Acquire git lock for mutating operations (add, remove, prune)
+    my $lock_acquired = 0;
+    if ($action ne 'list' && $context->{broker_client}) {
+        log_info('VersionControl', "Requesting git lock for worktree $action");
+        eval {
+            my $lock_result = $context->{broker_client}->request_git_lock();
+            if ($lock_result) {
+                $lock_acquired = 1;
+                log_info('VersionControl', "Git lock acquired for worktree $action");
+            } else {
+                return $self->error_result(
+                    "Git is locked by another agent.\n" .
+                    "Wait for the other agent's operation to complete."
+                );
+            }
+        };
+        if ($@) {
+            log_warning('VersionControl', "Failed to acquire git lock: $@");
+            log_warning('VersionControl', "Continuing without lock");
+        }
+    }
+    
+    eval {
+        my $original_cwd = getcwd();
+        chdir $repo_path if $repo_path ne '.';
+        
+        my $output;
+        if ($action eq 'list') {
+            $output = `git worktree list 2>&1`;
+        } elsif ($action eq 'add' && $worktree_path) {
+            my $branch = $params->{branch} || '';
+            my $create_branch = $params->{create_branch} || 0;
+            my $cmd = "git worktree add";
+            if ($create_branch && $branch) {
+                $cmd .= " -b $branch";
+            }
+            $cmd .= " $worktree_path";
+            $cmd .= " $branch" if $branch && !$create_branch;
+            $cmd .= " 2>&1";
+            $output = `$cmd`;
+        } elsif ($action eq 'remove' && $worktree_path) {
+            my $force = $params->{force} || 0;
+            my $cmd = "git worktree remove";
+            $cmd .= " --force" if $force;
+            $cmd .= " $worktree_path 2>&1";
+            $output = `$cmd`;
+        } elsif ($action eq 'prune') {
+            $output = `git worktree prune 2>&1`;
+        } else {
+            croak "Invalid worktree action or missing worktree_path";
+        }
+        
+        chdir $original_cwd if $repo_path ne '.';
+        
+        my $action_desc = $action eq 'list'
+            ? "listing worktrees"
+            : $action eq 'prune'
+            ? "pruning stale worktrees"
+            : "$action worktree" . ($worktree_path ? " '$worktree_path'" : "");
+        
+        $result = $self->success_result(
+            $output,
+            action_description => $action_desc,
+            action => $action,
+            worktree_path => $worktree_path,
+        );
+    };
+    
+    # Release git lock if acquired
+    if ($lock_acquired && $context->{broker_client}) {
+        eval {
+            $context->{broker_client}->release_git_lock();
+            log_info('VersionControl', "Git lock released after worktree $action");
+        };
+        if ($@) {
+            log_warning('VersionControl', "Failed to release git lock: $@");
+        }
+    }
+    
+    if ($@) {
+        return $self->error_result("Git worktree failed: $@");
+    }
+    
+    return $result;
+}
+
 sub _check_sandbox_path {
     my ($self, $path, $context) = @_;
     
@@ -662,7 +767,7 @@ sub get_additional_parameters {
         },
         action => {
             type => "string",
-            description => "Action for branch/stash/tag operations (list, create, delete, switch, save, apply, drop, clear)",
+            description => "Action for branch/stash/tag/worktree operations (list, create, delete, switch, save, apply, drop, clear, add, remove, prune)",
         },
         name => {
             type => "string",
@@ -683,6 +788,18 @@ sub get_additional_parameters {
         index => {
             type => "integer",
             description => "Stash index for apply/drop",
+        },
+        worktree_path => {
+            type => "string",
+            description => "Path for worktree add/remove operations",
+        },
+        create_branch => {
+            type => "boolean",
+            description => "Create a new branch when adding a worktree (use with branch parameter)",
+        },
+        force => {
+            type => "boolean",
+            description => "Force removal of a worktree even if it has modifications",
         },
     };
 }
