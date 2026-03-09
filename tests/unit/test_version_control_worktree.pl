@@ -60,10 +60,10 @@ my $temp_repo = tempdir(CLEANUP => 1);
 my $original_cwd = getcwd();
 
 # Initialize a git repo
-system("cd $temp_repo && git init -b main 2>&1 >/dev/null");
-system("cd $temp_repo && git config user.email 'test\@test.com' 2>&1 >/dev/null");
-system("cd $temp_repo && git config user.name 'Test User' 2>&1 >/dev/null");
-system("cd $temp_repo && echo 'hello' > README.md && git add . && git commit -m 'initial' 2>&1 >/dev/null");
+system("cd $temp_repo && git init -b main >/dev/null 2>&1");
+system("cd $temp_repo && git config user.email 'test\@test.com' >/dev/null 2>&1");
+system("cd $temp_repo && git config user.name 'Test User' >/dev/null 2>&1");
+system("cd $temp_repo && echo 'hello' > README.md && git add . && git commit -m 'initial' >/dev/null 2>&1");
 
 # Test 7: worktree list on a real repo
 my $list_result = $vc->route_operation('worktree', {
@@ -131,7 +131,7 @@ ok($invalid_result->{error}, 'invalid worktree action returns error');
 like($invalid_result->{error}, qr/Git worktree failed/, 'invalid action error is descriptive');
 
 # Test 14: worktree add with existing branch (no create)
-system("cd $temp_repo && git branch feature-existing 2>&1 >/dev/null");
+system("cd $temp_repo && git branch feature-existing >/dev/null 2>&1");
 my $worktree_dir2 = "$temp_repo/wt-existing";
 my $add_existing_result = $vc->route_operation('worktree', {
     repository_path => $temp_repo,
@@ -144,7 +144,7 @@ ok(!$add_existing_result->{error}, 'worktree add with existing branch succeeds')
 ok(-d $worktree_dir2, 'worktree directory for existing branch created');
 
 # Cleanup: remove worktree before temp dir cleanup
-system("cd $temp_repo && git worktree remove $worktree_dir2 --force 2>&1 >/dev/null");
+system("cd $temp_repo && git worktree remove $worktree_dir2 --force >/dev/null 2>&1");
 
 # Ensure cwd is restored
 chdir $original_cwd;

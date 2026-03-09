@@ -637,7 +637,7 @@ sub worktree {
         } elsif ($action eq 'prune') {
             $output = `git worktree prune 2>&1`;
         } else {
-            croak "Invalid worktree action or missing worktree_path";
+            croak "Invalid worktree action or missing worktree_path for add/remove";
         }
         
         chdir $original_cwd if $repo_path ne '.';
