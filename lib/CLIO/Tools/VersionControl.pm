@@ -55,7 +55,7 @@ sub new {
 -  tag - Tag operations (list, create, delete)
 
 ━━━━━━━━━━━━━━━━━━━━━ WORKTREE (1 operation) ━━━━━━━━━━━━━━━━━━━━━
--  worktree - Worktree operations (list, add, remove, prune)
+-  worktree - Worktree operations (list, add, remove, prune, merge, pr)
 
 [CRITICAL WARNING] ⚠️  NEVER USE INTERACTIVE OPERATIONS:
 -  git rebase -i / --interactive (BREAKS TERMINAL UI - FORBIDDEN)
@@ -578,7 +578,7 @@ sub worktree {
     my ($self, $params, $context) = @_;
     
     my $repo_path = $params->{repository_path} || '.';
-    my $action = $params->{action} || 'list';  # list, add, remove, prune
+    my $action = $params->{action} || 'list';  # list, add, remove, prune, merge, pr
     my $worktree_path = $params->{worktree_path} || '';
     my $result;
     
@@ -636,6 +636,26 @@ sub worktree {
             $output = `$cmd`;
         } elsif ($action eq 'prune') {
             $output = `git worktree prune 2>&1`;
+        } elsif (($action eq 'merge' || $action eq 'pr') && $worktree_path) {
+            # Resolve the branch name from the worktree
+            my $wt_list = `git worktree list --porcelain 2>&1`;
+            my $wt_branch = $self->_resolve_worktree_branch($wt_list, $worktree_path);
+            croak "Could not find worktree '$worktree_path' in worktree list" unless $wt_branch;
+            
+            if ($action eq 'merge') {
+                $output = `git merge $wt_branch 2>&1`;
+            } else {
+                # pr: push branch to remote, then provide PR info
+                my $remote = $params->{remote} || 'origin';
+                my $push_output = `git push $remote $wt_branch 2>&1`;
+                my $current_branch = `git rev-parse --abbrev-ref HEAD 2>&1`;
+                chomp $current_branch;
+                $output = $push_output . "\n" .
+                    "Branch '$wt_branch' pushed to $remote.\n" .
+                    "Create a pull request to merge '$wt_branch' into '$current_branch'.";
+            }
+        } elsif ($action eq 'merge' || $action eq 'pr') {
+            croak "worktree_path is required for '$action' action. Use action 'list' to see available worktrees.";
         } else {
             croak "Invalid worktree action or missing worktree_path for add/remove";
         }
@@ -672,6 +692,33 @@ sub worktree {
     }
     
     return $result;
+}
+
+sub _resolve_worktree_branch {
+    my ($self, $porcelain_output, $worktree_name) = @_;
+    
+    # Parse porcelain output to find the branch for a given worktree path/name.
+    # Porcelain format has blocks separated by blank lines:
+    #   worktree /abs/path
+    #   HEAD <sha>
+    #   branch refs/heads/<name>
+    my $found_path = 0;
+    my $branch;
+    
+    for my $line (split /\n/, $porcelain_output) {
+        if ($line =~ /^worktree\s+(.+)/) {
+            my $wt_path = $1;
+            # Match if the worktree path ends with the provided name, or is an exact match
+            $found_path = ($wt_path eq $worktree_name || $wt_path =~ /\Q$worktree_name\E$/);
+        } elsif ($found_path && $line =~ /^branch\s+refs\/heads\/(.+)/) {
+            $branch = $1;
+            last;
+        } elsif ($line eq '') {
+            $found_path = 0;
+        }
+    }
+    
+    return $branch;
 }
 
 sub _check_sandbox_path {
@@ -767,7 +814,7 @@ sub get_additional_parameters {
         },
         action => {
             type => "string",
-            description => "Action for branch/stash/tag/worktree operations (list, create, delete, switch, save, apply, drop, clear, add, remove, prune)",
+            description => "Action for branch/stash/tag/worktree operations (list, create, delete, switch, save, apply, drop, clear, add, remove, prune, merge, pr)",
         },
         name => {
             type => "string",

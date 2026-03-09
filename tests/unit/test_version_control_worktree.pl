@@ -15,7 +15,7 @@ test_version_control_worktree.pl - Unit tests for VersionControl worktree operat
 
 =head1 DESCRIPTION
 
-Tests the git worktree operations (list, add, remove, prune) in VersionControl tool.
+Tests the git worktree operations (list, add, remove, prune, merge, pr) in VersionControl tool.
 
 =cut
 
@@ -145,6 +145,73 @@ ok(-d $worktree_dir2, 'worktree directory for existing branch created');
 
 # Cleanup: remove worktree before temp dir cleanup
 system("cd $temp_repo && git worktree remove $worktree_dir2 --force >/dev/null 2>&1");
+
+# Test 15: merge action requires worktree_path
+my $merge_no_path = $vc->route_operation('worktree', {
+    repository_path => $temp_repo,
+    action => 'merge',
+}, {});
+ok($merge_no_path->{error}, 'merge without worktree_path returns error');
+like($merge_no_path->{error}, qr/worktree_path is required/, 'merge error message mentions worktree_path is required');
+
+# Test 16: pr action requires worktree_path
+my $pr_no_path = $vc->route_operation('worktree', {
+    repository_path => $temp_repo,
+    action => 'pr',
+}, {});
+ok($pr_no_path->{error}, 'pr without worktree_path returns error');
+like($pr_no_path->{error}, qr/worktree_path is required/, 'pr error message mentions worktree_path is required');
+
+# Test 17: merge action with a worktree
+# Create a worktree with a new branch, make a commit in it, then merge into main
+my $merge_wt_dir = "$temp_repo/wt-merge";
+system("cd $temp_repo && git worktree add -b merge-feature $merge_wt_dir >/dev/null 2>&1");
+system("cd $merge_wt_dir && echo 'merge test' > merge.txt && git add . && git commit -m 'merge commit' >/dev/null 2>&1");
+
+my $merge_result = $vc->route_operation('worktree', {
+    repository_path => $temp_repo,
+    action => 'merge',
+    worktree_path => 'wt-merge',
+}, {});
+ok(!$merge_result->{error}, 'merge worktree succeeds') or diag("Error: " . ($merge_result->{error} || ''));
+is($merge_result->{action}, 'merge', 'merge metadata action is correct');
+like($merge_result->{output}, qr/merge-feature|Fast-forward|Merge|Already up to date/i, 'merge output looks reasonable');
+
+# Verify the merged file exists in main
+ok(-f "$temp_repo/merge.txt", 'merged file exists in main worktree');
+
+# Cleanup merge worktree
+system("cd $temp_repo && git worktree remove $merge_wt_dir --force >/dev/null 2>&1");
+
+# Test 18: pr action with a worktree (no remote, so push will fail - but branch resolution should work)
+my $pr_wt_dir = "$temp_repo/wt-pr";
+system("cd $temp_repo && git worktree add -b pr-feature $pr_wt_dir >/dev/null 2>&1");
+
+my $pr_result = $vc->route_operation('worktree', {
+    repository_path => $temp_repo,
+    action => 'pr',
+    worktree_path => 'wt-pr',
+}, {});
+# The push will fail (no remote), but the action should still produce output
+ok($pr_result, 'pr action returns a result');
+is($pr_result->{action}, 'pr', 'pr metadata action is correct');
+
+# Cleanup pr worktree
+system("cd $temp_repo && git worktree remove $pr_wt_dir --force >/dev/null 2>&1");
+
+# Test 19: merge action with non-existent worktree name
+my $merge_bad = $vc->route_operation('worktree', {
+    repository_path => $temp_repo,
+    action => 'merge',
+    worktree_path => 'nonexistent-worktree',
+}, {});
+ok($merge_bad->{error}, 'merge with unknown worktree returns error');
+like($merge_bad->{error}, qr/Could not find worktree/, 'error mentions worktree not found');
+
+# Test 20: action description includes merge and pr
+my $params_check = $vc->get_additional_parameters();
+like($params_check->{action}{description}, qr/merge/, 'action description includes merge');
+like($params_check->{action}{description}, qr/pr/, 'action description includes pr');
 
 # Ensure cwd is restored
 chdir $original_cwd;

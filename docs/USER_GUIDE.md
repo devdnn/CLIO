@@ -413,6 +413,8 @@ CLIO provides 35+ powerful slash commands. Type `/help` in any session to see th
 | `/git worktree list` | List all worktrees |
 | `/git worktree add <path> [branch]` | Add a new worktree |
 | `/git worktree remove <path>` | Remove a worktree |
+| `/git worktree merge <name>` | Merge worktree branch into current branch |
+| `/git worktree pr <name>` | Push worktree branch and prepare PR |
 | `/status` | Show git status (shorthand) |
 | `/diff` | Show git diff (shorthand) |
 | `/commit` | Create commit (shorthand) |
