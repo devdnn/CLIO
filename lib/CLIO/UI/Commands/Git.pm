@@ -54,13 +54,6 @@ Remote Operations:
 Commit Operations:
 - /git commit [message] - Stage and commit changes
 
-Pull Request Operations:
-- /git pr - List open pull requests
-- /git pr list - List open pull requests
-- /git pr create [title] - Create a pull request
-- /git pr view [number] - View a pull request
-- /git pr checkout <number> - Check out a pull request locally
-
 History/Utility:
 - /git blame <file> - Show who changed each line
 - /git stash - List stashes
@@ -183,12 +176,6 @@ sub handle_git_command {
         return;
     }
 
-    # /git pr [list|create|view|checkout]
-    if ($action eq 'pr') {
-        $self->handle_pr_command(@args);
-        return;
-    }
-
     # /git worktree [list|add|remove|prune|merge]
     if ($action eq 'worktree') {
         $self->handle_worktree_command(@args);
@@ -229,14 +216,6 @@ sub _display_git_help {
     $self->display_command_row("/git pull [remote] [branch]", "Pull changes (default: origin, current)", 30);
     $self->writeline("", markdown => 0);
 
-    $self->display_section_header("PULL REQUEST");
-    $self->display_command_row("/git pr", "List open pull requests", 30);
-    $self->display_command_row("/git pr list", "List open pull requests", 30);
-    $self->display_command_row("/git pr create [title]", "Create a pull request", 30);
-    $self->display_command_row("/git pr view [number]", "View a pull request", 30);
-    $self->display_command_row("/git pr checkout <number>", "Check out a pull request", 30);
-    $self->writeline("", markdown => 0);
-    
     $self->display_section_header("COMMIT OPERATIONS");
     $self->display_command_row("/git commit [msg]", "Stage and commit changes", 30);
     $self->writeline("", markdown => 0);
@@ -780,107 +759,6 @@ sub handle_tag_command {
     }
     
     $self->display_success_message("Tag '$tag' created");
-}
-
-=head2 handle_pr_command
-
-Pull request operations via the GitHub CLI (gh): list, create, view, checkout.
-
-=cut
-
-sub handle_pr_command {
-    my ($self, @args) = @_;
-
-    # Require gh CLI
-    my $gh = `which gh 2>/dev/null`;
-    chomp $gh;
-    unless ($gh) {
-        $self->display_error_message("GitHub CLI (gh) not found. Install it from https://cli.github.com");
-        return;
-    }
-
-    my $action = $args[0] || 'list';
-    $action = lc($action);
-
-    # /git pr or /git pr list
-    if ($action eq 'list') {
-        my $output = `gh pr list 2>&1`;
-        my $exit_code = $? >> 8;
-        if ($exit_code != 0) {
-            $self->display_error_message("PR list failed: $output");
-            return;
-        }
-        $self->display_command_header("PULL REQUESTS");
-        if ($output =~ /^\s*$/) {
-            $self->writeline("No open pull requests.", markdown => 0);
-        } else {
-            for my $line (split /\n/, $output) {
-                $self->writeline($line, markdown => 0);
-            }
-        }
-        $self->writeline("", markdown => 0);
-        return;
-    }
-
-    # /git pr create [title]
-    if ($action eq 'create') {
-        my $title = join(' ', @args[1..$#args]);
-        my $cmd = 'gh pr create --fill';
-        $cmd .= " --title '$title'" if $title;
-        $cmd .= ' 2>&1';
-        my $output = `$cmd`;
-        my $exit_code = $? >> 8;
-        if ($exit_code != 0) {
-            $self->display_error_message("PR create failed: $output");
-            return;
-        }
-        $self->display_command_header("PULL REQUEST CREATED");
-        for my $line (split /\n/, $output) {
-            $self->writeline($line, markdown => 0);
-        }
-        $self->writeline("", markdown => 0);
-        $self->display_success_message("Pull request created");
-        return;
-    }
-
-    # /git pr view [number]
-    if ($action eq 'view') {
-        my $number = $args[1] || '';
-        my $cmd = 'gh pr view';
-        $cmd .= " '$number'" if $number;
-        $cmd .= ' 2>&1';
-        my $output = `$cmd`;
-        my $exit_code = $? >> 8;
-        if ($exit_code != 0) {
-            $self->display_error_message("PR view failed: $output");
-            return;
-        }
-        $self->display_command_header("PULL REQUEST");
-        for my $line (split /\n/, $output) {
-            $self->writeline($line, markdown => 0);
-        }
-        $self->writeline("", markdown => 0);
-        return;
-    }
-
-    # /git pr checkout <number>
-    if ($action eq 'checkout' || $action eq 'co') {
-        unless ($args[1]) {
-            $self->display_error_message("PR number required: /git pr checkout <number>");
-            return;
-        }
-        my $number = $args[1];
-        my $output = `gh pr checkout '$number' 2>&1`;
-        my $exit_code = $? >> 8;
-        if ($exit_code != 0) {
-            $self->display_error_message("PR checkout failed: $output");
-            return;
-        }
-        $self->display_success_message("Checked out PR #$number");
-        return;
-    }
-
-    $self->display_error_message("Unknown pr action: $action (use: list, create, view, checkout)");
 }
 
 =head2 handle_worktree_command
