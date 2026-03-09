@@ -640,7 +640,7 @@ sub worktree {
             # Resolve the branch name from the worktree
             my $wt_list = `git worktree list --porcelain 2>&1`;
             my $wt_branch = $self->_resolve_worktree_branch($wt_list, $worktree_path);
-            croak "Could not find worktree '$worktree_path' in worktree list" unless $wt_branch;
+            croak "Could not find worktree '$worktree_path' in worktree list. Use action 'list' to see available worktrees." unless $wt_branch;
             
             if ($action eq 'merge') {
                 $output = `git merge $wt_branch 2>&1`;
@@ -648,11 +648,17 @@ sub worktree {
                 # pr: push branch to remote, then provide PR info
                 my $remote = $params->{remote} || 'origin';
                 my $push_output = `git push $remote $wt_branch 2>&1`;
+                my $push_exit = $? >> 8;
                 my $current_branch = `git rev-parse --abbrev-ref HEAD 2>&1`;
                 chomp $current_branch;
-                $output = $push_output . "\n" .
-                    "Branch '$wt_branch' pushed to $remote.\n" .
-                    "Create a pull request to merge '$wt_branch' into '$current_branch'.";
+                if ($push_exit == 0) {
+                    $output = $push_output . "\n" .
+                        "Branch '$wt_branch' pushed to $remote.\n" .
+                        "Create a pull request to merge '$wt_branch' into '$current_branch'.";
+                } else {
+                    $output = "Push failed (exit $push_exit):\n" . $push_output . "\n" .
+                        "Fix the push issue, then create a pull request to merge '$wt_branch' into '$current_branch'.";
+                }
             }
         } elsif ($action eq 'merge' || $action eq 'pr') {
             croak "worktree_path is required for '$action' action. Use action 'list' to see available worktrees.";
@@ -708,8 +714,8 @@ sub _resolve_worktree_branch {
     for my $line (split /\n/, $porcelain_output) {
         if ($line =~ /^worktree\s+(.+)/) {
             my $wt_path = $1;
-            # Match if the worktree path ends with the provided name, or is an exact match
-            $found_path = ($wt_path eq $worktree_name || $wt_path =~ /\Q$worktree_name\E$/);
+            # Match if the worktree path ends with the provided name as a directory component, or is an exact match
+            $found_path = ($wt_path eq $worktree_name || $wt_path =~ m{/\Q$worktree_name\E$});
         } elsif ($found_path && $line =~ /^branch\s+refs\/heads\/(.+)/) {
             $branch = $1;
             last;
